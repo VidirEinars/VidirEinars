@@ -250,42 +250,46 @@ def build_email(ted_results, sam_results):
     if rel_ted:
         parts.append("<h3>🇪🇺 TED — Tenders Electronic Daily</h3>")
         for item, s in rel_ted:
+            title = s.get("title_en") or item["title"]
+            url   = item.get("url", "")
+            title_html = (
+                f"<a href='{url}' style='color:#003399;text-decoration:none'>{title}</a>"
+                if url else title
+            )
             parts.append(
                 f"<div style='border-left:4px solid #003399;padding:10px 16px;"
                 f"margin:12px 0;background:#f5f8ff'>"
-                f"<strong>{s.get('title_en') or item['title']}</strong>"
-                f"<p style='margin:4px 0'>"
-                f"<a href='{item['url']}' style='font-size:0.85em;color:#003399'>"
-                f"View on TED →</a></p>"
+                f"<strong>{title_html}</strong>"
                 f"<p style='margin:6px 0'>{s.get('summary_en', '')}</p>"
                 f"<p style='margin:4px 0;font-size:0.85em;color:#555'>"
                 f"{s.get('relevance', '')}</p>"
                 f"<p style='margin:4px 0;font-size:0.8em;color:#999'>"
-                f"Published: {item.get('published') or 'N/A'}</p>"
-                f"</div>"
+                f"Published: {item.get('published') or 'N/A'}"
+                + (f" &nbsp;|&nbsp; <a href='{url}' style='color:#003399'>View on TED →</a>" if url else "")
+                + f"</p></div>"
             )
         parts.append("<br>")
 
     if rel_sam:
         parts.append("<h3>🇺🇸 SAM.gov — US Government Opportunities</h3>")
         for item, s in rel_sam:
-            url = item.get("url", "")
-            link_html = (
-                f"<a href='{url}' style='font-size:0.85em;color:#B31942'>"
-                f"View on SAM.gov →</a>"
-                if url else ""
+            title = s.get("title_en") or item["title"]
+            url   = item.get("url", "")
+            title_html = (
+                f"<a href='{url}' style='color:#B31942;text-decoration:none'>{title}</a>"
+                if url else title
             )
             parts.append(
                 f"<div style='border-left:4px solid #B31942;padding:10px 16px;"
                 f"margin:12px 0;background:#fff5f6'>"
-                f"<strong>{s.get('title_en') or item['title']}</strong>"
-                f"<p style='margin:4px 0'>{link_html}</p>"
+                f"<strong>{title_html}</strong>"
                 f"<p style='margin:6px 0'>{s.get('summary_en', '')}</p>"
                 f"<p style='margin:4px 0;font-size:0.85em;color:#555'>"
                 f"{s.get('relevance', '')}</p>"
                 f"<p style='margin:4px 0;font-size:0.8em;color:#999'>"
-                f"Posted: {item.get('published') or 'N/A'}</p>"
-                f"</div>"
+                f"Posted: {item.get('published') or 'N/A'}"
+                + (f" &nbsp;|&nbsp; <a href='{url}' style='color:#B31942'>View on SAM.gov →</a>" if url else "")
+                + f"</p></div>"
             )
         parts.append("<br>")
 
