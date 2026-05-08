@@ -288,7 +288,8 @@ def build_email(results: list[dict]) -> tuple[str, str]:
             parts.append(f"""
 <div style='border-left:4px solid #2562AE;padding:10px 16px;margin:12px 0;background:#f9f9f9'>
   <div style='font-size:0.85em;color:#555;margin-bottom:4px'>{type_label} &nbsp;|&nbsp; {emoji} {item.get("status","").replace("_"," ").title()}</div>
-  <strong>{item.get("title_en","")}</strong>
+    <strong>{item.get("title_en","")}</strong>
+  <p style='margin:4px 0'><a href='{r["url"]}' style='font-size:0.85em;color:#2562AE'>View meeting minutes →</a></p>
   <p style='margin:6px 0'>{item.get("summary_en","")}</p>
   <blockquote style='border-left:3px solid #ccc;margin:8px 0;padding:4px 12px;color:#444;font-style:italic'>
     {item.get("quote_is","")}
