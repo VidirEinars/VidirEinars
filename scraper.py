@@ -15,6 +15,8 @@ from email.mime.text import MIMEText
 import requests
 from bs4 import BeautifulSoup
 import anthropic
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
@@ -126,29 +128,48 @@ def get_meetings_reykjanesbaer(muni: dict) -> list[dict]:
     return meetings
 
 def get_meetings_reykjavik(muni: dict) -> list[dict]:
-    soup = fetch(muni["index_url"])
-    if not soup:
+    """Use Reykjavík's official open API instead of scraping the JS-rendered page."""
+    try:
+        r = requests.get(
+            "https://api.reykjavik.is/gateway/meeting-documents/v1/api/meetings_list",
+            headers=HEADERS,
+            timeout=20,
+            verify=False  # their cert chain has issues but API is legitimate
+        )
+        r.raise_for_status()
+        data = r.json()
+    except Exception as e:
+        print(f"  ⚠ Reykjavík API error: {e}")
         return []
-    meetings = []
-    for row in soup.select("table tr"):
-        cells = row.find_all("td")
-        if len(cells) < 2:
-            continue
-        a = cells[0].find("a")
-        if not a:
-            continue
-        href = a["href"]
-        title = a.get_text(strip=True)
-        date_text = cells[1].get_text(strip=True)
-        dt = parse_icelandic_date(date_text)
-        url = muni["base_url"] + href if href.startswith("/") else href
-        meetings.append({"url": url, "title": title, "date": dt, "committee": href})
-    return meetings
 
-def get_meetings(muni: dict) -> list[dict]:
-    if muni["type"] == "reykjanesbaer":
-        return get_meetings_reykjanesbaer(muni)
-    return get_meetings_reykjavik(muni)
+    meetings = []
+    for item in data:
+        # API returns fields like: meetingDate, committeeNameIs, meetingUrl, meetingId
+        date_str = item.get("meetingDate", "")
+        try:
+            dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+        except Exception:
+            dt = None
+
+        url = item.get("meetingUrl") or item.get("url") or ""
+        if not url:
+            url = f"https://reykjavik.is/fundargerdir/{item.get('meetingId','')}"
+
+        committee = item.get("committeeNameIs") or item.get("committeeName") or ""
+        title = f"{committee} - {item.get('meetingNumber', '')}. fundur"
+
+        meetings.append({
+            "url": url,
+            "title": title,
+            "date": dt,
+            "committee": committee.lower().replace(" ", "-").replace("–", "-"),
+        })
+    return meetings
+Also add this import near the top of the file (after the existing imports):
+pythonimport urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+Once you've made those edits and committed, run the workflow again. The Reykjavík meetings should come through this time — their API returns clean structured JSON which is much more reliable than scraping.Sonnet 4.6
 
 # ── Meeting content fetcher ───────────────────────────────────────────────────
 
