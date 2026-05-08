@@ -175,47 +175,81 @@ def get_meetings_reykjanesbaer(muni):
 
 
 def get_meetings_reykjavik(muni):
-    """Scrape known committee pages directly since the index is JS-rendered."""
+    """Scrape the server-rendered Reykjavík fundargerðir index page directly.
+
+    Committee sub-pages (/fundargerdir/<committee>) are 404; the main index
+    page lists all meetings newest-first and is rendered server-side by Drupal.
+    Meeting slugs embed the committee name (e.g. borgarrad-fundur-nr-377) so
+    priority matching still works via is_priority().
+    """
     base = "https://reykjavik.is"
-    # Scrape individual committee listing pages which are server-rendered
-    committee_paths = [
-        "/fundargerdir/umhverfis-og-skipulagsrad",
-        "/fundargerdir/afgreidslufundir-skipulagsfulltrua",
-        "/fundargerdir/innkaupa-og-framkvaemdarad",
-        "/fundargerdir/borgarrad",
-        "/fundargerdir/borgarstjorn",
-        "/fundargerdir/skipulags-og-samgongurad",
-    ]
     meetings = []
-    for path in committee_paths:
-        url = base + path
+    seen: set = set()
+
+    for page in range(3):  # at most 3 pages; first page covers ~2 months
+        url = f"{base}/fundargerdir" + (f"?page={page}" if page > 0 else "")
         soup = fetch(url)
         if not soup:
-            continue
-        for a in soup.find_all("a", href=True):
+            break
+
+        page_meetings = []
+        for a in soup.select("a[href^='/fundargerdir/']"):
             href = a["href"]
-            if "/fundargerdir/" not in href or href == path:
+            if href.rstrip("/") == "/fundargerdir":
                 continue
-            text = a.get_text(" ", strip=True)
-            date_match = re.search(r'(\d{1,2}\.\s?\w+\.?\s+\d{4})', text)
-            dt = parse_icelandic_date(date_match.group(1)) if date_match else None
-            full_url = base + href if href.startswith("/") else href
-            committee_slug = path.split("/")[-1]
-            meetings.append({
-                "url": full_url,
-                "title": text,
-                "date": dt,
-                "committee": committee_slug,
+            full_url = base + href
+            if full_url in seen:
+                continue
+            seen.add(full_url)
+
+            # Walk up the DOM looking for a <time datetime="..."> or an
+            # Icelandic date pattern near this link.  Stop at compact
+            # containers (< 500 chars) to avoid matching another meeting's date.
+            dt = None
+            node = a.parent
+            for _ in range(6):
+                if node is None:
+                    break
+                time_tag = node.find("time")
+                if time_tag:
+                    dt_attr = time_tag.get("datetime", "")
+                    if dt_attr:
+                        try:
+                            dt = datetime.fromisoformat(dt_attr[:10])
+                            dt = dt.replace(tzinfo=timezone.utc)
+                            break
+                        except ValueError:
+                            pass
+                text = node.get_text(" ", strip=True)
+                if len(text) < 500:
+                    m = re.search(r'\d{1,2}\.\s+\w+\s+\d{4}', text)
+                    if m:
+                        dt = parse_icelandic_date(m.group(0))
+                        if dt:
+                            break
+                node = node.parent
+
+            slug = href.strip("/").split("/")[-1]
+            page_meetings.append({
+                "url":       full_url,
+                "title":     a.get_text(" ", strip=True),
+                "date":      dt,
+                "committee": slug,
             })
-    # deduplicate by url
-    seen = set()
-    unique = []
-    for m in meetings:
-        if m["url"] not in seen:
-            seen.add(m["url"])
-            unique.append(m)
-    print(f"  Found {len(unique)} unique meetings across committee pages")
-    return unique
+
+        if not page_meetings:
+            break
+
+        meetings.extend(page_meetings)
+
+        # The index is sorted newest-first.  Once the oldest dated meeting on
+        # this page is outside the lookback window, older pages can be ignored.
+        dated = [m for m in page_meetings if m["date"]]
+        if dated and not is_recent(min(m["date"] for m in dated)):
+            break
+
+    print(f"  Found {len(meetings)} Reykjavík meetings on index page")
+    return meetings
 
 # ── Meeting content fetcher ───────────────────────────────────────────────────
 def get_meetings(muni):
