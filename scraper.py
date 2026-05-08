@@ -175,56 +175,47 @@ def get_meetings_reykjanesbaer(muni):
 
 
 def get_meetings_reykjavik(muni):
-    """Use Reykjavik's official open API."""
-    try:
-        r = requests.get(
-            "https://api.reykjavik.is/gateway/meeting-documents/v1/api/meetings_list",
-            headers=HEADERS,
-            timeout=20,
-            verify=False,
-        )
-        r.raise_for_status()
-        data = r.json()
-    except Exception as e:
-        print(f"  Reykjavik API error: {e}")
-        return []
-
-    print(f"  Reykjavik API returned {len(data)} items")
-    if data:
-        print(f"  Sample item keys: {list(data[0].keys())}")
-        print(f"  Sample item: {data[0]}")
-
+    """Scrape known committee pages directly since the index is JS-rendered."""
+    base = "https://reykjavik.is"
+    # Scrape individual committee listing pages which are server-rendered
+    committee_paths = [
+        "/fundargerdir/umhverfis-og-skipulagsrad",
+        "/fundargerdir/afgreidslufundir-skipulagsfulltrua",
+        "/fundargerdir/innkaupa-og-framkvaemdarad",
+        "/fundargerdir/borgarrad",
+        "/fundargerdir/borgarstjorn",
+        "/fundargerdir/skipulags-og-samgongurad",
+    ]
     meetings = []
-    for item in data:
-        # This API returns documents, use 'updated' as the date
-        date_str = str(item.get("updated") or item.get("created") or "")
-        dt = None
-        try:
-            dt = datetime.strptime(date_str[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
-        except Exception:
-            pass
-
-        # Build URL from documentId
-        doc_id = item.get("documentId", "")
-        url = f"https://reykjavik.is/fundargerdir/{doc_id}" if doc_id else ""
-
-        committee = item.get("groupName") or ""
-        title = f"{committee} - fundur"
-
-        meetings.append({
-            "url": url,
-            "title": title,
-            "date": dt,
-            "committee": committee.lower().replace(" ", "-").replace("\u2013", "-"),
-        })
-    return meetings
-
-
-def get_meetings(muni):
-    if muni["type"] == "reykjanesbaer":
-        return get_meetings_reykjanesbaer(muni)
-    return get_meetings_reykjavik(muni)
-
+    for path in committee_paths:
+        url = base + path
+        soup = fetch(url)
+        if not soup:
+            continue
+        for a in soup.find_all("a", href=True):
+            href = a["href"]
+            if "/fundargerdir/" not in href or href == path:
+                continue
+            text = a.get_text(" ", strip=True)
+            date_match = re.search(r'(\d{1,2}\.\s?\w+\.?\s+\d{4})', text)
+            dt = parse_icelandic_date(date_match.group(1)) if date_match else None
+            full_url = base + href if href.startswith("/") else href
+            committee_slug = path.split("/")[-1]
+            meetings.append({
+                "url": full_url,
+                "title": text,
+                "date": dt,
+                "committee": committee_slug,
+            })
+    # deduplicate by url
+    seen = set()
+    unique = []
+    for m in meetings:
+        if m["url"] not in seen:
+            seen.add(m["url"])
+            unique.append(m)
+    print(f"  Found {len(unique)} unique meetings across committee pages")
+    return unique
 
 # ── Meeting content fetcher ───────────────────────────────────────────────────
 
