@@ -21,7 +21,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
-RECIPIENT_EMAILS = ["vidir@istak.is", "hjalmur@istak.is", "karl@istak.is"]
+RECIPIENT_EMAILS = ["vidir@istak.is"]
 
 SENDER_EMAIL    = os.environ["GMAIL_USER"]
 GMAIL_APP_PASS  = os.environ["GMAIL_APP_PASSWORD"]
@@ -63,28 +63,18 @@ MUNICIPALITIES = [
 
 # ── Prompt ────────────────────────────────────────────────────────────────────
 
-SYSTEM_PROMPT = """You are an expert analyst monitoring Icelandic municipal meeting minutes
-for a construction company interested in COMMERCIAL opportunities only.
+SYSTEM_PROMPT = """You are an analyst reading Icelandic municipal meeting minutes.
+Extract ALL items that involve any of the following — be very generous in your interpretation:
+- Any construction, building, or renovation project
+- Any zoning or planning change
+- Any permit of any kind
+- Any tender or procurement
+- Any infrastructure work
+- Any land or lot matter
+- Any harbour or port matter
 
-INCLUDE these types of items:
-- Public tenders and procurement (útboð, innkaup) of any size
-- Large infrastructure projects (roads, utilities, sewage, public spaces)
-- New commercial or industrial zoning/planning changes (deiliskipulag, aðalskipulag)
-- Public building projects (schools, sports facilities, community buildings)
-- Large residential developments (10+ units, apartment blocks)
-- Harbour construction, port development and marine infrastructure (höfn, hafnargarður,
-  bryggja, Njarðvíkurhöfn, Helguvíkurhöfn) — always include regardless of size
-- Land allocation for commercial/industrial use (lóðir fyrir atvinnubyggingar)
-
-EXCLUDE these types of items:
-- Single family home permits (einbýlishús)
-- Small home extensions or renovations (viðbyggingar, endurbætur á einbýli)
-- Advertising signs (auglýsingaskilti)
-- Small garage or shed permits
-- Anything clearly for a private individual homeowner
-
-If unsure whether something is relevant, ALWAYS include it. It is better to
-include too much than to miss a real opportunity.
+Include everything except pure administrative items like election of committee chairs,
+approval of previous minutes, or financial reports.
 
 Respond in this exact JSON format (no markdown fences):
 {
@@ -92,8 +82,8 @@ Respond in this exact JSON format (no markdown fences):
   "items": [
     {
       "title_en": "Short English title",
-      "summary_en": "2-3 sentence English summary of what was decided/discussed",
-      "quote_is": "The most relevant original Icelandic sentence or two from the text",
+      "summary_en": "2-3 sentence English summary",
+      "quote_is": "The most relevant original Icelandic sentence or two",
       "type": "one of: tender | infrastructure | zoning | public_building | large_residential | land | other",
       "status": "one of: approved | rejected | under_review | advertised | for_info"
     }
