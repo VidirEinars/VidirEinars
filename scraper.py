@@ -311,12 +311,13 @@ def send_email(subject: str, html_body: str):
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"]    = SENDER_EMAIL
-    msg["To"]      = RECIPIENT_EMAIL
+    msg["To"] = ", ".join(RECIPIENT_EMAILS)
     msg.attach(MIMEText(html_body, "html", "utf-8"))
 
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
         server.login(SENDER_EMAIL, GMAIL_APP_PASS)
-        server.sendmail(SENDER_EMAIL, RECIPIENT_EMAIL, msg.as_string())
+        msg["To"] = ", ".join(RECIPIENT_EMAILS)
+        server.sendmail(SENDER_EMAIL, RECIPIENT_EMAILS, msg.as_string())
     print(f"✉ Email sent to {RECIPIENT_EMAIL}")
 
 # ── Main ──────────────────────────────────────────────────────────────────────
