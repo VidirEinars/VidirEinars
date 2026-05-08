@@ -220,7 +220,7 @@ def analyse_meeting(title: str, url: str, text: str) -> list[dict]:
     try:
         msg = client.messages.create(
             model="claude-sonnet-4-5",
-            max_tokens=1500,
+            max_tokens=4096,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": prompt}],
         )
