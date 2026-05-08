@@ -2,7 +2,7 @@ name: Weekly Municipal Monitor
 
 on:
   schedule:
-    # Every Monday at 07:00 UTC (09:00 Reykjavík time)
+    # Every Monday at 07:00 UTC = 07:00 Reykjavík time (Iceland is UTC year-round)
     - cron: "0 7 * * 1"
   workflow_dispatch:  # allow manual trigger from GitHub UI
 
