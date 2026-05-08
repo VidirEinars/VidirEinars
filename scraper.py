@@ -15,6 +15,7 @@ from email.mime.text import MIMEText
 
 import requests
 from bs4 import BeautifulSoup
+from xml.etree import ElementTree as ET
 import anthropic
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -61,20 +62,14 @@ MUNICIPALITIES = [
     },
     {
         "name": "Hafnarfjörður",
-        # Listing page is JS-rendered; individual meetings ARE at /fundargerd/.
-        # The scraper will return 0 meetings until the JS API is wired up.
-        "index_url": "https://www.hafnarfjordur.is/stjornsysla/fundargerdir/",
+        # The fundargerðir search page is JS-rendered and committee meetings
+        # (skipulags-, umhverfis-ráð etc.) have no server-rendered listing
+        # since 2024.  Bæjarstjórn (council) meetings are accessible via the
+        # WordPress councilmeetings sitemap + navigation links on each page.
+        "index_url": "https://www.hafnarfjordur.is/councilmeetings-sitemap1.xml",
         "base_url":  "https://www.hafnarfjordur.is",
-        "type":      "generic",
-        "href_prefix": "/fundargerd/",
-        "flat_urls":   True,
-        "priority_committees": [
-            "skipulags-og-byggingarr",   # Skipulags- og byggingarráð (Umbraco slug)
-            "umhverfis-og-framkvaemda",
-            "afgreislufundur",           # Afgreiðslufundur skipulags/byggingarfulltrúa
-            "hafnarstjorn",
-            "baejarrad",
-        ],
+        "type":      "hafnarfjordur",
+        "priority_committees": ["baejarstjorn"],
     },
     {
         "name": "Garðabær",
@@ -375,6 +370,93 @@ def get_meetings_reykjavik(muni):
     print(f"  Found {len(meetings)} Reykjavík meetings on index page")
     return meetings
 
+def get_meetings_hafnarfjordur(muni):
+    """
+    Hafnarfjörður bæjarstjórn (council) meetings.
+
+    The fundargerðir listing is JS-rendered and committee meetings have no
+    server-rendered archive since 2024.  We use two steps instead:
+
+    1. Parse councilmeetings-sitemap1.xml for all known council meeting URLs.
+       Dates are embedded in each slug (e.g. fundur-1976-6-mai-2026).
+    2. Fetch the most-recent known meeting page and harvest its "Aðrir fundir"
+       navigation links, which expose meetings newer than the sitemap.
+    """
+    SITEMAP_NS = "http://www.sitemaps.org/schemas/sitemap/0.9"
+    base       = muni["base_url"]
+
+    def _date_from_slug(slug):
+        """Parse date from slug like 'fundur-1976-6-mai-2026'."""
+        parts = slug.split("-")
+        # Year is always the last component (4 digits, >= 2000)
+        if len(parts) < 3:
+            return None
+        y = parts[-1]
+        if not (len(y) == 4 and y.isdigit() and int(y) >= 2000):
+            return None
+        month, day = parts[-2], parts[-3]
+        if not day.isdigit():
+            return None
+        return parse_icelandic_date(f"{day} {month} {y}")
+
+    # ── Step 1: parse sitemap ──────────────────────────────────────────────
+    try:
+        r = requests.get(muni["index_url"], headers=HEADERS, timeout=20, verify=False)
+        r.raise_for_status()
+        tree = ET.fromstring(r.content)
+        sitemap_locs = [el.text.strip()
+                        for el in tree.findall(f".//{{{SITEMAP_NS}}}loc")]
+    except Exception as e:
+        print(f"  Hafnarfjörður: sitemap error: {e}")
+        return []
+
+    url_dates: list[tuple[str, object]] = []
+    for loc in sitemap_locs:
+        slug = loc.rstrip("/").split("/")[-1]
+        url_dates.append((loc, _date_from_slug(slug)))
+
+    dated = [(u, d) for u, d in url_dates if d is not None]
+    if not dated:
+        return []
+    dated.sort(key=lambda x: x[1], reverse=True)
+
+    # ── Step 2: fetch most-recent page; harvest newer nav links ───────────
+    extra: set[str] = set()
+    soup = fetch(dated[0][0])
+    if soup:
+        for a in soup.find_all("a", href=True):
+            href = a["href"]
+            if "/baejarstjornarfundur/" not in href:
+                continue
+            full = (href if href.startswith("http") else base + href).rstrip("/") + "/"
+            extra.add(full)
+
+    # ── Step 3: combine, date, filter ─────────────────────────────────────
+    all_urls: set[str] = {u for u, _ in url_dates} | extra
+    meetings = []
+    seen: set[str] = set()
+
+    for url in all_urls:
+        if url in seen:
+            continue
+        seen.add(url)
+        slug = url.rstrip("/").split("/")[-1]
+        dt   = _date_from_slug(slug)
+        if not is_recent(dt):
+            continue
+        parts = slug.split("-")
+        num   = parts[1] if len(parts) > 1 and parts[1].isdigit() else ""
+        meetings.append({
+            "url":       url,
+            "title":     f"Bæjarstjórnarfundur {num}. fundur" if num else slug,
+            "date":      dt,
+            "committee": "baejarstjorn",
+        })
+
+    print(f"  Found {len(meetings)} recent Hafnarfjörður council meetings")
+    return meetings
+
+
 def get_meetings_generic(muni):
     """
     Generic scraper for municipalities with a server-rendered meeting index.
@@ -486,6 +568,8 @@ def get_meetings(muni):
         return get_meetings_reykjanesbaer(muni)
     if t == "reykjavik":
         return get_meetings_reykjavik(muni)
+    if t == "hafnarfjordur":
+        return get_meetings_hafnarfjordur(muni)
     if t == "generic":
         return get_meetings_generic(muni)
     return []
