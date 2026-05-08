@@ -72,7 +72,8 @@ INCLUDE these types of items:
 - New commercial or industrial zoning/planning changes (deiliskipulag, aðalskipulag)
 - Public building projects (schools, sports facilities, community buildings)
 - Large residential developments (10+ units, apartment blocks)
-- Harbour and industrial area developments
+- Harbour construction, port development and marine infrastructure (höfn, hafnargarður,
+  bryggja, Njarðvíkurhöfn, Helguvíkurhöfn) — always include regardless of size
 - Land allocation for commercial/industrial use (lóðir fyrir atvinnubyggingar)
 
 EXCLUDE these types of items:
@@ -82,7 +83,8 @@ EXCLUDE these types of items:
 - Small garage or shed permits
 - Anything clearly for a private individual homeowner
 
-If unsure whether something is large enough to be relevant, include it.
+If unsure whether something is relevant, ALWAYS include it. It is better to
+include too much than to miss a real opportunity.
 
 Respond in this exact JSON format (no markdown fences):
 {
