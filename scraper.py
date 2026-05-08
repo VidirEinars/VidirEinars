@@ -196,27 +196,20 @@ def get_meetings_reykjavik(muni):
 
     meetings = []
     for item in data:
-        date_str = str(
-            item.get("meetingDate") or
-            item.get("date") or
-            item.get("startDate") or ""
-        )
+        # This API returns documents, use 'updated' as the date
+        date_str = str(item.get("updated") or item.get("created") or "")
         dt = None
-        for fmt in ["%Y-%m-%dT%H:%M:%S", "%Y-%m-%d", "%d.%m.%Y"]:
-            try:
-                dt = datetime.strptime(date_str[:len(fmt)], fmt).replace(tzinfo=timezone.utc)
-                break
-            except Exception:
-                continue
-        if dt is None and date_str:
-            print(f"  Could not parse date: {repr(date_str)}")
+        try:
+            dt = datetime.strptime(date_str[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
+        except Exception:
+            pass
 
-        url = item.get("meetingUrl") or item.get("url") or ""
-        if not url:
-            url = f"https://reykjavik.is/fundargerdir/{item.get('meetingId', '')}"
+        # Build URL from documentId
+        doc_id = item.get("documentId", "")
+        url = f"https://reykjavik.is/fundargerdir/{doc_id}" if doc_id else ""
 
-        committee = item.get("committeeNameIs") or item.get("committeeName") or ""
-        title = f"{committee} - {item.get('meetingNumber', '')}. fundur"
+        committee = item.get("groupName") or ""
+        title = f"{committee} - fundur"
 
         meetings.append({
             "url": url,
