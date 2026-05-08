@@ -229,7 +229,9 @@ def analyse_meeting(title: str, url: str, text: str) -> list[dict]:
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": prompt}],
         )
-        raw = msg.content[0].text.strip()
+     raw = msg.content[0].text.strip()
+        raw = re.sub(r'^```json\s*|\s*```$', '', raw, flags=re.MULTILINE).strip()
+        print(f"     Raw Claude response: {raw[:100]}")
         data = json.loads(raw)
         if data.get("has_relevant_items"):
             return data.get("items", [])
