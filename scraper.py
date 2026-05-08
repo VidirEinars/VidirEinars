@@ -22,7 +22,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
-RECIPIENT_EMAILS = ["vidir@istak.is"]
+RECIPIENT_EMAILS = ["vidir@istak.is", "hjalmur@istak.is"]
 
 SENDER_EMAIL   = os.environ["GMAIL_USER"]
 GMAIL_APP_PASS = os.environ["GMAIL_APP_PASSWORD"]
