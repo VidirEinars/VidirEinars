@@ -20,7 +20,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
-RECIPIENT_EMAIL = "vidir@istak.is"
+RECIPIENT_EMAILS = ["vidir@istak.is", "hjalmur@istak.is", "karl@istak.is"]
 SENDER_EMAIL    = os.environ["GMAIL_USER"]        # set in GitHub Actions secrets
 GMAIL_APP_PASS  = os.environ["GMAIL_APP_PASSWORD"] # set in GitHub Actions secrets
 ANTHROPIC_KEY   = os.environ["ANTHROPIC_API_KEY"]  # set in GitHub Actions secrets
