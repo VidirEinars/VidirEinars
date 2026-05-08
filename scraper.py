@@ -8,6 +8,7 @@ import os
 import re
 import smtplib
 import json
+import urllib3
 from datetime import datetime, timedelta, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -15,17 +16,18 @@ from email.mime.text import MIMEText
 import requests
 from bs4 import BeautifulSoup
 import anthropic
-import urllib3
+
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
-RECIPIENT_EMAILS = ["vidir@istak.is", "hjalmur@istak.is", "karl@istak.is"]
-SENDER_EMAIL    = os.environ["GMAIL_USER"]        # set in GitHub Actions secrets
-GMAIL_APP_PASS  = os.environ["GMAIL_APP_PASSWORD"] # set in GitHub Actions secrets
-ANTHROPIC_KEY   = os.environ["ANTHROPIC_API_KEY"]  # set in GitHub Actions secrets
+RECIPIENT_EMAILS = ["vidir@istak.is"]  # add more emails to this list as needed
 
-LOOKBACK_DAYS = 8   # catch meetings published in the last 8 days (buffer for weekends)
+SENDER_EMAIL    = os.environ["GMAIL_USER"]
+GMAIL_APP_PASS  = os.environ["GMAIL_APP_PASSWORD"]
+ANTHROPIC_KEY   = os.environ["ANTHROPIC_API_KEY"]
+
+LOOKBACK_DAYS = 8
 
 MUNICIPALITIES = [
     {
@@ -33,7 +35,6 @@ MUNICIPALITIES = [
         "index_url": "https://www.reykjanesbaer.is/is/stjornsysla/stjornsyslan/fundargerdir",
         "base_url":  "https://www.reykjanesbaer.is",
         "type":      "reykjanesbaer",
-        # committees most likely to contain construction/tender items
         "priority_committees": [
             "umhverfis-og-skipulagsrad",
             "afgreidslufundur-byggingarfulltrua",
@@ -60,134 +61,9 @@ MUNICIPALITIES = [
     },
 ]
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# ── Prompt ────────────────────────────────────────────────────────────────────
 
-HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; MunicipalMonitorBot/1.0)"}
-
-def fetch(url: str) -> BeautifulSoup | None:
-    try:
-        r = requests.get(url, headers=HEADERS, timeout=20)
-        r.raise_for_status()
-        return BeautifulSoup(r.text, "html.parser")
-    except Exception as e:
-        print(f"  ⚠ Could not fetch {url}: {e}")
-        return None
-
-def parse_icelandic_date(text: str) -> datetime | None:
-    """Parse dates like '17. apríl 2026', '07. maí. 2026', 'Miðvikudagur, 6. maí 2026'."""
-    MONTHS = {
-        "jan": 1, "feb": 2, "mar": 3, "apr": 4, "maí": 5, "jún": 6,
-        "júl": 7, "ágú": 8, "sep": 9, "okt": 10, "nóv": 11, "des": 12,
-    }
-    text = text.lower().strip()
-    # Remove weekday prefix
-    if "," in text:
-        text = text.split(",", 1)[1].strip()
-    # Remove trailing periods from month abbreviations
-    text = re.sub(r'\.\s', ' ', text).strip()
-    parts = text.split()
-    if len(parts) < 3:
-        return None
-    try:
-        day   = int(parts[0].rstrip("."))
-        month = next((v for k, v in MONTHS.items() if parts[1].startswith(k)), None)
-        year  = int(parts[2])
-        if month:
-            return datetime(year, month, day, tzinfo=timezone.utc)
-    except Exception:
-        pass
-    return None
-
-def is_recent(dt: datetime | None, days: int = LOOKBACK_DAYS) -> bool:
-    if dt is None:
-        return False
-    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-    return dt >= cutoff
-
-def is_priority(url: str, committee_slugs: list[str]) -> bool:
-    return any(slug in url for slug in committee_slugs)
-
-# ── Index scrapers ────────────────────────────────────────────────────────────
-
-def get_meetings_reykjanesbaer(muni: dict) -> list[dict]:
-    soup = fetch(muni["index_url"])
-    if not soup:
-        return []
-    meetings = []
-    for a in soup.select("a[href*='/fundargerdir/']"):
-        href = a["href"]
-        # skip the index page itself and committee overview pages
-        if href.count("/") < 6:
-            continue
-        text = a.get_text(" ", strip=True)
-        # date is usually the last part of the text  e.g. "387. fundur 17. apr. 2026"
-        date_match = re.search(r'(\d{1,2}\.\s?\w+\.?\s+\d{4})', text)
-        dt = parse_icelandic_date(date_match.group(1)) if date_match else None
-        url = muni["base_url"] + href if href.startswith("/") else href
-        meetings.append({"url": url, "title": text, "date": dt, "committee": href})
-    return meetings
-
-def get_meetings_reykjavik(muni: dict) -> list[dict]:
-    """Use Reykjavík's official open API instead of scraping the JS-rendered page."""
-    try:
-        r = requests.get(
-            "https://api.reykjavik.is/gateway/meeting-documents/v1/api/meetings_list",
-            headers=HEADERS,
-            timeout=20,
-            verify=False  # their cert chain has issues but API is legitimate
-        )
-        r.raise_for_status()
-        data = r.json()
-    except Exception as e:
-        print(f"  ⚠ Reykjavík API error: {e}")
-        return []
-
-    meetings = []
-    for item in data:
-        # API returns fields like: meetingDate, committeeNameIs, meetingUrl, meetingId
-        date_str = item.get("meetingDate", "")
-        try:
-            dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
-        except Exception:
-            dt = None
-
-        url = item.get("meetingUrl") or item.get("url") or ""
-        if not url:
-            url = f"https://reykjavik.is/fundargerdir/{item.get('meetingId','')}"
-
-        committee = item.get("committeeNameIs") or item.get("committeeName") or ""
-        title = f"{committee} - {item.get('meetingNumber', '')}. fundur"
-
-        meetings.append({
-            "url": url,
-            "title": title,
-            "date": dt,
-            "committee": committee.lower().replace(" ", "-").replace("–", "-"),
-        })
-    return meetings
-Also add this import near the top of the file (after the existing imports):
-pythonimport urllib3
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
-Once you've made those edits and committed, run the workflow again. The Reykjavík meetings should come through this time — their API returns clean structured JSON which is much more reliable than scraping.Sonnet 4.6
-
-# ── Meeting content fetcher ───────────────────────────────────────────────────
-
-def get_meeting_text(url: str) -> str:
-    soup = fetch(url)
-    if not soup:
-        return ""
-    main = soup.find("main") or soup.find(id="main") or soup.find("article")
-    if main:
-        # Remove nav/sidebar cruft
-        for tag in main.select("nav, .sidebar, .breadcrumb, footer, script, style"):
-            tag.decompose()
-        return main.get_text("\n", strip=True)
-    return soup.get_text("\n", strip=True)[:8000]
-
-# ── Claude analysis ───────────────────────────────────────────────────────────
-
-SYSTEM_PROMPT = """You are an expert analyst monitoring Icelandic municipal meeting minutes 
+SYSTEM_PROMPT = """You are an expert analyst monitoring Icelandic municipal meeting minutes
 for a construction company interested in COMMERCIAL opportunities only.
 
 INCLUDE these types of items:
@@ -223,6 +99,127 @@ Respond in this exact JSON format (no markdown fences):
 }
 
 If nothing relevant, return {"has_relevant_items": false, "items": []}"""
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; MunicipalMonitorBot/1.0)"}
+
+def fetch(url: str) -> BeautifulSoup | None:
+    try:
+        r = requests.get(url, headers=HEADERS, timeout=20, verify=False)
+        r.raise_for_status()
+        return BeautifulSoup(r.text, "html.parser")
+    except Exception as e:
+        print(f"  ⚠ Could not fetch {url}: {e}")
+        return None
+
+def parse_icelandic_date(text: str) -> datetime | None:
+    MONTHS = {
+        "jan": 1, "feb": 2, "mar": 3, "apr": 4, "maí": 5, "jún": 6,
+        "júl": 7, "ágú": 8, "sep": 9, "okt": 10, "nóv": 11, "des": 12,
+    }
+    text = text.lower().strip()
+    if "," in text:
+        text = text.split(",", 1)[1].strip()
+    text = re.sub(r'\.\s', ' ', text).strip()
+    parts = text.split()
+    if len(parts) < 3:
+        return None
+    try:
+        day   = int(parts[0].rstrip("."))
+        month = next((v for k, v in MONTHS.items() if parts[1].startswith(k)), None)
+        year  = int(parts[2])
+        if month:
+            return datetime(year, month, day, tzinfo=timezone.utc)
+    except Exception:
+        pass
+    return None
+
+def is_recent(dt: datetime | None, days: int = LOOKBACK_DAYS) -> bool:
+    if dt is None:
+        return False
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    return dt >= cutoff
+
+def is_priority(url: str, committee_slugs: list[str]) -> bool:
+    return any(slug in url for slug in committee_slugs)
+
+# ── Index scrapers ────────────────────────────────────────────────────────────
+
+def get_meetings_reykjanesbaer(muni: dict) -> list[dict]:
+    soup = fetch(muni["index_url"])
+    if not soup:
+        return []
+    meetings = []
+    for a in soup.select("a[href*='/fundargerdir/']"):
+        href = a["href"]
+        if href.count("/") < 6:
+            continue
+        text = a.get_text(" ", strip=True)
+        date_match = re.search(r'(\d{1,2}\.\s?\w+\.?\s+\d{4})', text)
+        dt = parse_icelandic_date(date_match.group(1)) if date_match else None
+        url = muni["base_url"] + href if href.startswith("/") else href
+        meetings.append({"url": url, "title": text, "date": dt, "committee": href})
+    return meetings
+
+def get_meetings_reykjavik(muni: dict) -> list[dict]:
+    """Use Reykjavik's official open API."""
+    try:
+        r = requests.get(
+            "https://api.reykjavik.is/gateway/meeting-documents/v1/api/meetings_list",
+            headers=HEADERS,
+            timeout=20,
+            verify=False,
+        )
+        r.raise_for_status()
+        data = r.json()
+    except Exception as e:
+        print(f"  ⚠ Reykjavik API error: {e}")
+        return []
+
+    meetings = []
+    for item in data:
+        date_str = item.get("meetingDate", "")
+        try:
+            dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+        except Exception:
+            dt = None
+
+        url = item.get("meetingUrl") or item.get("url") or ""
+        if not url:
+            url = f"https://reykjavik.is/fundargerdir/{item.get('meetingId', '')}"
+
+        committee = item.get("committeeNameIs") or item.get("committeeName") or ""
+        title = f"{committee} - {item.get('meetingNumber', '')}. fundur"
+
+        meetings.append({
+            "url": url,
+            "title": title,
+            "date": dt,
+            "committee": committee.lower().replace(" ", "-").replace("\u2013", "-"),
+        })
+    return meetings
+
+def get_meetings(muni: dict) -> list[dict]:
+    if muni["type"] == "reykjanesbaer":
+        return get_meetings_reykjanesbaer(muni)
+    return get_meetings_reykjavik(muni)
+
+# ── Meeting content fetcher ───────────────────────────────────────────────────
+
+def get_meeting_text(url: str) -> str:
+    soup = fetch(url)
+    if not soup:
+        return ""
+    main = soup.find("main") or soup.find(id="main") or soup.find("article")
+    if main:
+        for tag in main.select("nav, .sidebar, .breadcrumb, footer, script, style"):
+            tag.decompose()
+        return main.get_text("\n", strip=True)
+    return soup.get_text("\n", strip=True)[:8000]
+
+# ── Claude analysis ───────────────────────────────────────────────────────────
+
 def analyse_meeting(title: str, url: str, text: str) -> list[dict]:
     if not text.strip():
         return []
@@ -230,7 +227,7 @@ def analyse_meeting(title: str, url: str, text: str) -> list[dict]:
     prompt = f"Meeting: {title}\nURL: {url}\n\n---\n\n{text[:12000]}"
     try:
         msg = client.messages.create(
-            model="claude-opus-4-5",
+            model="claude-sonnet-4-5",
             max_tokens=1500,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": prompt}],
@@ -253,32 +250,30 @@ STATUS_EMOJI = {
     "for_info":     "ℹ️",
 }
 TYPE_LABEL = {
-    "construction": "🏗 Construction",
-    "tender":       "📋 Tender / Procurement",
-    "zoning":       "🗺 Zoning / Planning",
-    "permit":       "🔏 Building Permit",
-    "infrastructure": "🔧 Infrastructure",
-    "land":         "📍 Land / Lots",
-    "other":        "📌 Other",
+    "tender":           "📋 Tender / Procurement",
+    "infrastructure":   "🔧 Infrastructure",
+    "zoning":           "🗺 Zoning / Planning",
+    "public_building":  "🏛 Public Building",
+    "large_residential":"🏢 Large Residential",
+    "land":             "📍 Land / Lots",
+    "other":            "📌 Other",
 }
 
 def build_email(results: list[dict]) -> tuple[str, str]:
-    """Returns (subject, html_body)."""
     week_str = datetime.now().strftime("%d %b %Y")
     total = sum(len(r["items"]) for r in results if r["items"])
 
     if total == 0:
         subject = f"[Municipal Monitor] No relevant items — week of {week_str}"
-        html = f"""<h2>Municipal Monitor — {week_str}</h2>
-<p>No new construction projects, tenders, or planning items found in meeting minutes 
-published in the past week across Reykjanesbær and Reykjavík.</p>"""
+        html = f"<h2>Municipal Monitor — {week_str}</h2><p>No new commercial construction projects, tenders, or planning items found this week.</p>"
         return subject, html
 
     subject = f"[Municipal Monitor] {total} item{'s' if total != 1 else ''} found — week of {week_str}"
 
-    parts = [f"<h2>🏙 Municipal Monitor — {week_str}</h2>",
-             f"<p><strong>{total} relevant item{'s' if total != 1 else ''}</strong> found across "
-             f"{len([r for r in results if r['items']])} meeting(s).</p><hr>"]
+    parts = [
+        f"<h2>🏙 Municipal Monitor — {week_str}</h2>",
+        f"<p><strong>{total} relevant item{'s' if total != 1 else ''}</strong> found this week.</p><hr>",
+    ]
 
     for r in results:
         if not r["items"]:
@@ -299,9 +294,11 @@ published in the past week across Reykjanesbær and Reykjavík.</p>"""
 </div>""")
         parts.append("<br>")
 
-    parts.append(f"<hr><p style='color:#999;font-size:0.8em'>Generated {datetime.now().strftime('%Y-%m-%d %H:%M UTC')} "
-                 f"| <a href='https://www.reykjanesbaer.is/is/stjornsysla/stjornsyslan/fundargerdir'>Reykjanesbær</a> "
-                 f"| <a href='https://reykjavik.is/fundargerdir'>Reykjavík</a></p>")
+    parts.append(
+        f"<hr><p style='color:#999;font-size:0.8em'>Generated {datetime.now().strftime('%Y-%m-%d %H:%M UTC')} "
+        f"| <a href='https://www.reykjanesbaer.is/is/stjornsysla/stjornsyslan/fundargerdir'>Reykjanesbær</a> "
+        f"| <a href='https://reykjavik.is/fundargerdir'>Reykjavík</a></p>"
+    )
 
     return subject, "\n".join(parts)
 
@@ -311,14 +308,13 @@ def send_email(subject: str, html_body: str):
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"]    = SENDER_EMAIL
-    msg["To"] = ", ".join(RECIPIENT_EMAILS)
+    msg["To"]      = ", ".join(RECIPIENT_EMAILS)
     msg.attach(MIMEText(html_body, "html", "utf-8"))
 
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
         server.login(SENDER_EMAIL, GMAIL_APP_PASS)
-        msg["To"] = ", ".join(RECIPIENT_EMAILS)
         server.sendmail(SENDER_EMAIL, RECIPIENT_EMAILS, msg.as_string())
-    print(f"✉ Email sent to {RECIPIENT_EMAIL}")
+    print(f"✉ Email sent to {', '.join(RECIPIENT_EMAILS)}")
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
@@ -338,7 +334,6 @@ def main():
         recent = [m for m in meetings if is_recent(m["date"])]
         print(f"  {len(recent)} are within last {LOOKBACK_DAYS} days")
 
-        # prioritise planning/construction committees, but include all recent
         priority = [m for m in recent if is_priority(m["committee"], muni["priority_committees"])]
         others   = [m for m in recent if not is_priority(m["committee"], muni["priority_committees"])]
         ordered  = priority + others
