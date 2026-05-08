@@ -59,6 +59,109 @@ MUNICIPALITIES = [
             "skipulags-og-samgongurad",
         ],
     },
+    {
+        "name": "Hafnarfjörður",
+        # Listing page is JS-rendered; individual meetings ARE at /fundargerd/.
+        # The scraper will return 0 meetings until the JS API is wired up.
+        "index_url": "https://www.hafnarfjordur.is/stjornsysla/fundargerdir/",
+        "base_url":  "https://www.hafnarfjordur.is",
+        "type":      "generic",
+        "href_prefix": "/fundargerd/",
+        "flat_urls":   True,
+        "priority_committees": [
+            "skipulags-og-byggingarr",   # Skipulags- og byggingarráð (Umbraco slug)
+            "umhverfis-og-framkvaemda",
+            "afgreislufundur",           # Afgreiðslufundur skipulags/byggingarfulltrúa
+            "hafnarstjorn",
+            "baejarrad",
+        ],
+    },
+    {
+        "name": "Garðabær",
+        "index_url": "https://www.gardabaer.is/stjornsyslan/fundargerdir",
+        "base_url":  "https://www.gardabaer.is",
+        "type":      "generic",
+        "href_prefix": "/stjornsyslan/fundargerdir/",
+        "priority_committees": [
+            "skipulagsnefnd",
+            "afgreidslufundir-skipulagsstjora",
+            "baejarrad",
+            "baejarstjorn",
+        ],
+    },
+    {
+        "name": "Kópavogur",
+        "index_url": "https://www.kopavogur.is/is/stjornsysla/fundargerdir",
+        "base_url":  "https://www.kopavogur.is",
+        "type":      "generic",
+        "href_prefix": "/is/stjornsysla/fundargerdir/",
+        "priority_committees": [
+            "skipulags-og-umhverfisrad",
+            "innkaupanefnd",
+            "skipulagsfulltrua",   # matches embaettisafgreidslur-skipulagsfulltrua
+            "byggingarfulltrua",   # matches afgreidslur-byggingarfulltrua
+            "baejarrad",
+            "baejarstjorn",
+        ],
+    },
+    {
+        "name": "Árborg",
+        "index_url": "https://www.arborg.is/stjornsysla/stjornkerfi/fundargerdir/searchmeetings.aspx",
+        "base_url":  "https://www.arborg.is",
+        "type":      "generic",
+        "href_contains":      "DisplayMeeting.aspx",
+        "committee_from_text": True,
+        "priority_committees": [
+            "skipulagsnefnd",
+            "eigna-og-veitunefnd",
+            "baejarrad",
+            "baejarstjorn",
+        ],
+    },
+    {
+        "name": "Ölfus",
+        "index_url": "https://www.olfus.is/is/stjornsysla/stjornkerfi/fundargerdir",
+        "base_url":  "https://www.olfus.is",
+        "type":      "generic",
+        "href_contains":      "display?id=",
+        "committee_from_text": True,
+        "priority_committees": [
+            "skipulags",
+            "framkvaemda",
+            "byggingarfulltrua",
+            "baejarrad",
+            "baejarstjorn",
+        ],
+    },
+    {
+        "name": "Mosfellsbær",
+        # Domain is mos.is (not mosfellsbaer.is).
+        "index_url": "https://mos.is/stjornsysla/baejarstjorn-rad-og-nefndir/fundargerdir/",
+        "base_url":  "https://mos.is",
+        "type":      "generic",
+        "href_prefix": "/stjornsysla/baejarstjorn-rad-og-nefndir/fundargerdir/",
+        "priority_committees": [
+            "skipulag",
+            "umhverfis",
+            "framkvaemda",
+            "innkaup",
+            "byggingarfulltrua",
+            "baejarrad",
+            "baejarstjorn",
+        ],
+    },
+    {
+        "name": "Akranes",
+        "index_url": "https://www.akranes.is/stjornsysla/fundargerdir",
+        "base_url":  "https://www.akranes.is",
+        "type":      "generic",
+        "href_prefix": "/stjornsysla/fundargerdir/",
+        "priority_committees": [
+            "skipulags-og-umhverfisrad",
+            "baejarrad",
+            "baejarstjorn",
+        ],
+    },
 ]
 
 # ── Prompt ────────────────────────────────────────────────────────────────────
@@ -140,6 +243,27 @@ def parse_icelandic_date(text):
     except Exception:
         pass
     return None
+
+
+def parse_numeric_date(text):
+    """Parse a DD.MM.YYYY date string into a UTC datetime."""
+    m = re.search(r'(\d{1,2})\.(\d{2})\.(\d{4})', text)
+    if not m:
+        return None
+    try:
+        return datetime(int(m.group(3)), int(m.group(2)), int(m.group(1)),
+                        tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def _to_slug(text):
+    """Transliterate an Icelandic string to a lowercase ASCII slug."""
+    text = text.lower()
+    for ic, en in [("á","a"),("é","e"),("í","i"),("ó","o"),("ú","u"),("ý","y"),
+                   ("ö","o"),("ð","d"),("þ","th"),("æ","ae")]:
+        text = text.replace(ic, en)
+    return re.sub(r"[^a-z0-9]+", "-", text).strip("-")
 
 
 def is_recent(dt, days=None):
@@ -251,11 +375,120 @@ def get_meetings_reykjavik(muni):
     print(f"  Found {len(meetings)} Reykjavík meetings on index page")
     return meetings
 
+def get_meetings_generic(muni):
+    """
+    Generic scraper for municipalities with a server-rendered meeting index.
+
+    Relevant config keys:
+      href_prefix       – only follow links starting with this; committee slug is
+                          the first path component after it.
+      flat_urls         – set True when the entire slug is committee-number merged
+                          with no second "/" (Hafnarfjörður pattern).
+      href_contains     – alternative to href_prefix: any link containing this
+                          substring (used for ?id= style URLs).
+      committee_from_text – parse committee from link text rather than URL.
+
+    Handles both Icelandic month-name dates and DD.MM.YYYY.
+    """
+    soup = fetch(muni["index_url"])
+    if not soup:
+        return []
+
+    base      = muni["base_url"]
+    prefix    = muni.get("href_prefix", "")
+    contains  = muni.get("href_contains", "")
+    from_text = muni.get("committee_from_text", False)
+    flat      = muni.get("flat_urls", False)
+    idx_dir   = muni["index_url"].rsplit("/", 1)[0]
+    meetings  = []
+    seen: set = set()
+
+    for a in soup.find_all("a", href=True):
+        href = a["href"]
+
+        if prefix:
+            if not href.startswith(prefix):
+                continue
+            tail = href[len(prefix):].rstrip("/")
+            if not tail:
+                continue
+            if not flat and "/" not in tail:
+                continue
+        elif contains:
+            if contains not in href:
+                continue
+        else:
+            continue
+
+        if href.startswith("http"):
+            full_url = href
+        elif href.startswith("/"):
+            full_url = base + href
+        else:
+            full_url = idx_dir + "/" + href
+
+        if full_url in seen:
+            continue
+        seen.add(full_url)
+
+        text = a.get_text(" ", strip=True)
+
+        dt   = None
+        node = a.parent
+        for _ in range(5):
+            if node is None:
+                break
+            time_tag = node.find("time")
+            if time_tag:
+                dt_attr = time_tag.get("datetime", "")
+                if dt_attr:
+                    try:
+                        dt = datetime.fromisoformat(dt_attr[:10])
+                        dt = dt.replace(tzinfo=timezone.utc)
+                        break
+                    except ValueError:
+                        pass
+            ptext = node.get_text(" ", strip=True)
+            if len(ptext) < 500:
+                m = re.search(r'\d{1,2}\.\s+\w+\s+\d{4}', ptext)
+                if m:
+                    dt = parse_icelandic_date(m.group(0))
+                    if dt:
+                        break
+                dt = parse_numeric_date(ptext)
+                if dt:
+                    break
+            node = node.parent
+
+        if from_text:
+            raw = text.split(" - ")[0].strip() if " - " in text else text.split()[0]
+            committee = _to_slug(raw)
+        elif prefix:
+            committee = tail.split("/")[0]
+        else:
+            committee = _to_slug(href.rsplit("/", 1)[-1].split("?")[0])
+
+        meetings.append({
+            "url":       full_url,
+            "title":     text,
+            "date":      dt,
+            "committee": committee,
+        })
+
+    print(f"  Found {len(meetings)} meetings")
+    return meetings
+
+
 # ── Meeting content fetcher ───────────────────────────────────────────────────
 def get_meetings(muni):
-    if muni["type"] == "reykjanesbaer":
+    t = muni["type"]
+    if t == "reykjanesbaer":
         return get_meetings_reykjanesbaer(muni)
-    return get_meetings_reykjavik(muni)
+    if t == "reykjavik":
+        return get_meetings_reykjavik(muni)
+    if t == "generic":
+        return get_meetings_generic(muni)
+    return []
 def get_meeting_text(url):
     soup = fetch(url)
     if not soup:
