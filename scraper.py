@@ -171,11 +171,16 @@ def get_meetings_reykjavik(muni: dict) -> list[dict]:
 
     meetings = []
     for item in data:
-        date_str = item.get("meetingDate", "")
-        try:
-            dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
-        except Exception:
-            dt = None
+       date_str = str(item.get("meetingDate") or item.get("date") or item.get("startDate") or "")
+        dt = None
+        for fmt in ["%Y-%m-%dT%H:%M:%S", "%Y-%m-%d", "%d.%m.%Y"]:
+            try:
+                dt = datetime.strptime(date_str[:len(fmt)], fmt).replace(tzinfo=timezone.utc)
+                break
+            except Exception:
+                continue
+        if dt is None and date_str:
+            print(f"     ⚠ Could not parse date: {date_str!r}")
 
         url = item.get("meetingUrl") or item.get("url") or ""
         if not url:
@@ -230,7 +235,7 @@ def analyse_meeting(title: str, url: str, text: str) -> list[dict]:
             return data.get("items", [])
     except Exception as e:
         print(f"  ⚠ Claude error for {url}: {e}")
-    return []
+        print(f"     Raw response was: {raw[:200] if 'raw' in dir() else 'empty'}")
 
 # ── Email builder ─────────────────────────────────────────────────────────────
 
