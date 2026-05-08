@@ -188,10 +188,25 @@ def get_meeting_text(url: str) -> str:
 # ── Claude analysis ───────────────────────────────────────────────────────────
 
 SYSTEM_PROMPT = """You are an expert analyst monitoring Icelandic municipal meeting minutes 
-for a construction company. Extract only items relevant to: new construction projects, 
-zoning/planning changes (deiliskipulag, aðalskipulag), building permits (byggingarleyfi), 
-tenders or procurement (útboð, innkaup), infrastructure works (framkvæmdaleyfi, lagnir, 
-vegagerð), land allocation (lóðir), and major development approvals.
+for a construction company interested in COMMERCIAL opportunities only.
+
+INCLUDE these types of items:
+- Public tenders and procurement (útboð, innkaup) of any size
+- Large infrastructure projects (roads, utilities, sewage, public spaces)
+- New commercial or industrial zoning/planning changes (deiliskipulag, aðalskipulag)
+- Public building projects (schools, sports facilities, community buildings)
+- Large residential developments (10+ units, apartment blocks)
+- Harbour and industrial area developments
+- Land allocation for commercial/industrial use (lóðir fyrir atvinnubyggingar)
+
+EXCLUDE these types of items:
+- Single family home permits (einbýlishús)
+- Small home extensions or renovations (viðbyggingar, endurbætur á einbýli)
+- Advertising signs (auglýsingaskilti)
+- Small garage or shed permits
+- Anything clearly for a private individual homeowner
+
+If unsure whether something is large enough to be relevant, include it.
 
 Respond in this exact JSON format (no markdown fences):
 {
@@ -201,14 +216,13 @@ Respond in this exact JSON format (no markdown fences):
       "title_en": "Short English title",
       "summary_en": "2-3 sentence English summary of what was decided/discussed",
       "quote_is": "The most relevant original Icelandic sentence or two from the text",
-      "type": "one of: construction | tender | zoning | permit | infrastructure | land | other",
+      "type": "one of: tender | infrastructure | zoning | public_building | large_residential | land | other",
       "status": "one of: approved | rejected | under_review | advertised | for_info"
     }
   ]
 }
 
 If nothing relevant, return {"has_relevant_items": false, "items": []}"""
-
 def analyse_meeting(title: str, url: str, text: str) -> list[dict]:
     if not text.strip():
         return []
