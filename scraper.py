@@ -218,7 +218,10 @@ def get_meetings_reykjavik(muni):
     return unique
 
 # ── Meeting content fetcher ───────────────────────────────────────────────────
-
+def get_meetings(muni):
+    if muni["type"] == "reykjanesbaer":
+        return get_meetings_reykjanesbaer(muni)
+    return get_meetings_reykjavik(muni)
 def get_meeting_text(url):
     soup = fetch(url)
     if not soup:
