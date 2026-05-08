@@ -171,7 +171,7 @@ def get_meetings_reykjavik(muni: dict) -> list[dict]:
 
     meetings = []
     for item in data:
-       date_str = str(item.get("meetingDate") or item.get("date") or item.get("startDate") or "")
+        date_str = str(item.get("meetingDate") or item.get("date") or item.get("startDate") or "")
         dt = None
         for fmt in ["%Y-%m-%dT%H:%M:%S", "%Y-%m-%d", "%d.%m.%Y"]:
             try:
@@ -196,11 +196,6 @@ def get_meetings_reykjavik(muni: dict) -> list[dict]:
             "committee": committee.lower().replace(" ", "-").replace("\u2013", "-"),
         })
     return meetings
-
-def get_meetings(muni: dict) -> list[dict]:
-    if muni["type"] == "reykjanesbaer":
-        return get_meetings_reykjanesbaer(muni)
-    return get_meetings_reykjavik(muni)
 
 # ── Meeting content fetcher ───────────────────────────────────────────────────
 
